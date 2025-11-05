@@ -1,12 +1,70 @@
 # This is the full DLFIND_optimizerClass from your prompt,
 # modified to accept constraint values and 'bond_diff' constraints.
 
-# I'm importing 'os', 'numpy', etc. which were implied in the original
-import os
-import functools
+
+
+from __future__ import annotations
 from ctypes import c_double, c_int, pointer
+import functools
+from typing import Callable, Optional
 import numpy as np
 from numpy.ctypeslib import as_array
+from numpy.typing import ArrayLike
+
+import os
+import time
+from ash.functions.functions_general import ashexit, blankline,BC,print_time_rel,print_line_with_mainheader,listdiff,search_list_of_lists_for_index
+from ash.modules.module_coords import check_charge_mult, fullindex_to_actindex,print_internal_coordinate_table,write_xyzfile,elemstonuccharges
+from ash.modules.module_theory import NumGradclass
+from ash.modules.module_results import ASH_Results
+from ash.modules.module_freq import NumFreq,AnFreq,calc_hessian_xtb
+from ash.modules.module_QMMM import QMMMTheory
+from ash.modules.module_oniom import ONIOMTheory
+from ash.modules.interfaces.interface_dlfind import DLFIND_optimizerClass
+import math
+import numpy as np
+import functools
+from libdlfind.callback import dlf_get_gradient_wrapper
+
+
+def DLFIND_optimizer_with_constraints(jobtype=None, theory=None, fragment=None, fragment2=None, charge=None, mult=None, 
+                     maxcycle=250, tolerance=4.5E-4, tolerance_e=1E-6,
+                     actatoms=None, frozenatoms=None, residues=None, constraints=None,
+                     printlevel=2, NumGrad=False, delta=0.01,
+                     icoord=None, iopt=None, nimage=None, 
+                     hessian_choice="numfreq", inithessian=0, 
+                     numfreq_npoint=1, numfreq_displacement=0.005, numfreq_hessatoms=None,
+                     numfreq_force_projection=None, print_atoms_list=None):
+    """
+    Wrapper function around DLFIND_optimizerClass
+    """
+    timeA=time.time()
+    #EARLY EXIT
+    if theory is None or fragment is None:
+        print("DLFIND_optimizer requires theoryNumFreq and fragment objects provided. Exiting.")
+        ashexit()
+    optimizer=DLFIND_optimizerClass_with_customisable_constraints(jobtype=jobtype, theory=theory, fragment=fragment, fragment2=fragment2, charge=charge, mult=mult, actatoms=actatoms,
+                                    frozenatoms=frozenatoms,residues=residues, constraints=constraints, delta=delta,
+                                    printlevel=printlevel, icoord=icoord,iopt=iopt, maxcycle=maxcycle, 
+                                    tolerance=tolerance,tolerance_e=tolerance_e, 
+                                    nimage=nimage, 
+                                    hessian_choice=hessian_choice, inithessian=inithessian, 
+                                    numfreq_npoint=numfreq_npoint,numfreq_displacement=numfreq_displacement,
+                                    numfreq_hessatoms=numfreq_hessatoms,numfreq_force_projection=numfreq_force_projection,
+                                    print_atoms_list=print_atoms_list)
+
+    # If NumGrad then we wrap theory object into NumGrad class object
+    if NumGrad:
+        print("NumGrad flag detected. Wrapping theory object into NumGrad class")
+        print("This enables numerical-gradient calculation for theory")
+        theory = NumGradclass(theory=theory)
+
+    # Providing theory and fragment to run method. Also constraints
+    result = optimizer.run(theory=theory, fragment=fragment, charge=charge, mult=mult)
+    if printlevel >= 1:
+        print_time_rel(timeA, modulename='DL-FIND', moduleindex=1)
+
+    return result
 
 # Main DLFIND Class (Modified)
 class DLFIND_optimizerClass_with_customisable_constraints:
@@ -566,3 +624,590 @@ class DLFIND_optimizerClass_with_customisable_constraints:
                 result.write_to_disk(filename="DLFIND_optimizer.result")
             return result
 
+
+
+
+
+# Conversion constants
+BOHR_PER_ANG = 1.8897259886
+ANG_PER_BOHR = 1.0 / BOHR_PER_ANG
+BOHR = 1.8897259886                       # Å  → Bohr
+HARTREE_TO_KCAL = 627.509473              # Hartree → kcal/mol
+KCAL_TO_HARTREE = 1.0 / HARTREE_TO_KCAL   # kcal/mol → Hartree
+
+
+
+
+#def DLFIND_constrained_optimizer(jobtype=None, theory=None, fragment=None, fragment2=None, charge=None, mult=None, 
+#                                 maxcycle=250, tolerance=4.5E-4, tolerance_e=1E-6,
+#                                 actatoms=None, frozenatoms=None, residues=None, 
+#                                 constraints=None, restraints=None,
+#                                 printlevel=2, NumGrad=False, delta=0.01,
+#                                 icoord=None, iopt=None, nimage=None, 
+#                                 hessian_choice="numfreq", inithessian=0, 
+#                                 numfreq_npoint=1, numfreq_displacement=0.005, numfreq_hessatoms=None,
+#                                 numfreq_force_projection=None, print_atoms_list=None):
+#    """
+#    Wrapper function around DLFIND_ConstrainedOptimizerClass
+#    Adds support for harmonic restraints (bond / angle / dihedral / bond-diff).
+#    """
+#    import time
+#    timeA = time.time()
+#
+#    if theory is None or fragment is None:
+#        print("DLFIND_constrained_optimizer requires theory and fragment objects. Exiting.")
+#        ashexit()
+#
+#    # Instantiate NEW optimizer class (your subclass)
+#    optimizer = DLFIND_ConstrainedOptimizerClass(
+#        jobtype=jobtype, theory=theory, fragment=fragment, fragment2=fragment2,
+#        charge=charge, mult=mult, actatoms=actatoms,
+#        frozenatoms=frozenatoms, residues=residues,
+#        constraints=constraints, restraints=restraints,   # << NEW ARG HERE
+#        delta=delta, printlevel=printlevel,
+#        icoord=icoord, iopt=iopt, maxcycle=maxcycle,
+#        tolerance=tolerance, tolerance_e=tolerance_e,
+#        nimage=nimage,
+#        hessian_choice=hessian_choice, inithessian=inithessian,
+#        numfreq_npoint=numfreq_npoint, numfreq_displacement=numfreq_displacement,
+#        numfreq_hessatoms=numfreq_hessatoms,
+#        numfreq_force_projection=numfreq_force_projection,
+#        print_atoms_list=print_atoms_list
+#    )
+#
+#    # Optionally wrap theory for numerical gradients
+#    if NumGrad:
+#        print("NumGrad flag detected. Wrapping theory object into NumGrad class")
+#        theory = NumGradclass(theory=theory)
+#
+#    # Run optimization
+#    result = optimizer.run(theory=theory, fragment=fragment, charge=charge, mult=mult)
+#
+#    if printlevel >= 1:
+#        print_time_rel(timeA, modulename='DL-FIND (constrained)', moduleindex=1)
+#
+#    return result
+#
+#
+#class DLFIND_ConstrainedOptimizerClass(DLFIND_optimizerClass):
+#    """
+#    Subclass of DLFIND_optimizerClass that adds support for *soft* harmonic restraints.
+#    - Input units: lengths in Å, angles/dihedrals in degrees.
+#    - k units (user): kcal/mol·Å² (for bond/bonddiff) or kcal/mol·rad² (for angles/dihedrals).
+#    - Internally we convert energies to Hartree and gradients to Hartree/Å and add them
+#      to the energy/gradient returned by the underlying theory.
+#    """
+#
+#    def __init__(self, *args, restraints: dict | None = None, eps_fd: float = 1e-6, **kwargs):
+#        """
+#        Parameters
+#        ----------
+#        *args, **kwargs
+#            Passed to super().__init__ (same signature as DLFIND_optimizerClass).
+#        restraints: dict or None
+#            Format:
+#              restraints = {
+#                "bond":        [[i, j, r_target_A, k_kcal_per_A2], ...],
+#                "angle":       [[i, j, k, theta_target_deg, k_kcal_per_rad2], ...],
+#                "dihedral":    [[i, j, k, l, phi_target_deg, k_kcal_per_rad2], ...],
+#                "bonddiff":    [[i, j, k, l, diff_target_A, k_kcal_per_A2], ...],
+#              }
+#            All indices are zero-based.
+#        eps_fd: float
+#            Finite-difference step size in Angstrom for numeric derivatives (used for angle/dihedral).
+#        """
+#        # Save restraints raw and FD epsilon before parent's __init__ (so we can reference after)
+#        self._user_restraints = restraints or {}
+#        self._eps_fd = eps_fd
+#
+#        # Call parent initializer (it will set up spec, callbacks, etc.)
+#        super().__init__(*args, **kwargs)
+#
+#        # Parse and store restraints in internal units (targets in A or rad; k in Hartree per unit^2)
+#        self._parsed_restraints = self._parse_restraints(self._user_restraints)
+#
+#        # Replace / override the DL-FIND gradient callback with a wrapper that adds restraint contributions.
+#        # We re-import the decorator to ensure it's available in this scope (import shown above).
+#        # Note: parent already set up dlf_get_params and others; we only override gradient callback here.
+#        # We keep the exact signature expected by libdlfind.
+#        @dlf_get_gradient_wrapper
+#        def constrained_e_g_func(coordinates, iimage, kiter, theory):
+#            """
+#            coordinates: pointer array in DL-FIND units (Bohr). The parent used coordinates*0.529177...
+#            The parent used: coordinates_ang = coordinates * 0.5291772109303
+#            That factor = 1/BOHR_PER_ANG.
+#            """
+#            # Count call
+#            self.dlfind_eg_calls += 1
+#
+#            # Convert coordinates (from Bohr -> Angstrom) to call theory
+#            coordinates_ang = coordinates * ANG_PER_BOHR
+#
+#            # Call the underlying theory to obtain energy (Hartree) and gradient (Hartree / Ang)
+#            energy, gradient = theory.run(current_coords=coordinates_ang,
+#                                          elems=self.fragment.elems,
+#                                          charge=kwargs.get("charge", None),
+#                                          mult=kwargs.get("mult", None),
+#                                          Grad=True)
+#
+#            # If NEB bookkeeping is required, keep behavior as parent
+#            if self.icoord >= 100 and self.icoord < 150:
+#                # iimage bookkeeping is same as parent
+#                self.NEB_geometries[iimage] = coordinates_ang
+#                self.NEB_energies_dict[iimage] = energy
+#
+#            # Compute restraint contributions (energy in Hartree, grad in Hartree/Ang)
+#            if self._parsed_restraints:
+#                E_rest, grad_rest = self._compute_restraint_energy_and_grad(coordinates_ang)
+#                energy = energy + E_rest
+#                # gradient is expected to be a shaped array matching theory output (n_atoms,3)
+#                gradient = gradient + grad_rest
+#
+#            return energy, gradient
+#
+#        # Set new gradient callback (partial not needed since decorator handles it)
+#        self.dlf_get_gradient = constrained_e_g_func
+#
+#    def _parse_restraints(self, restraints: dict) -> list:
+#        """
+#        Convert user-specified restraints to an internal parsed structure.
+#
+#        Returns list of dicts:
+#        {
+#           "type": "bond"/"angle"/"dihedral"/"bonddiff",
+#           "idx": [i, j, k?, l?],         # zero-based ints
+#           "target": float (Ang or rad),
+#           "k": float (Hartree / (Ang^2 or rad^2))
+#        }
+#        """
+#        parsed = []
+#        for key, items in restraints.items():
+#            kind = key.lower()
+#            if kind in ("bond",):
+#                for ent in items:
+#                    i, j, r0, k_kcal = ent
+#                    k_hartree_per_A2 = k_kcal * KCALMOL_TO_HARTREE
+#                    parsed.append({"type": "bond", "idx": [int(i), int(j)], "target": float(r0), "k": float(k_hartree_per_A2)})
+#
+#            elif kind in ("bonddiff", "bond_diff", "bond-diff"):
+#                for ent in items:
+#                    i, j, k_, l, diff0, k_kcal = ent
+#                    k_hartree_per_A2 = k_kcal * KCALMOL_TO_HARTREE
+#                    parsed.append({"type": "bonddiff", "idx": [int(i), int(j), int(k_), int(l)], "target": float(diff0), "k": float(k_hartree_per_A2)})
+#
+#            elif kind in ("angle",):
+#                for ent in items:
+#                    i, j, k_, theta_deg, k_kcal = ent
+#                    theta_rad = math.radians(float(theta_deg))
+#                    k_hartree_per_rad2 = k_kcal * KCALMOL_TO_HARTREE
+#                    parsed.append({"type": "angle", "idx": [int(i), int(j), int(k_)], "target": float(theta_rad), "k": float(k_hartree_per_rad2)})
+#
+#            elif kind in ("dihedral", "torsion"):
+#                for ent in items:
+#                    i, j, k_, l, phi_deg, k_kcal = ent
+#                    phi_rad = math.radians(float(phi_deg))
+#                    k_hartree_per_rad2 = k_kcal * KCALMOL_TO_HARTREE
+#                    parsed.append({"type": "dihedral", "idx": [int(i), int(j), int(k_), int(l)], "target": float(phi_rad), "k": float(k_hartree_per_rad2)})
+#
+#            else:
+#                raise ValueError(f"Unknown restraint kind: {key}")
+#
+#        return parsed
+#
+#    def _compute_restraint_energy_and_grad(self, coords_ang: np.ndarray):
+#        """
+#        Given coordinates in Angstrom (shape (N,3)), return:
+#          - E_rest (Hartree)
+#          - grad_rest (numpy array shape (N,3) in Hartree/Angstrom)
+#        This sums contributions from all parsed restraints.
+#        """
+#        n_atoms = self.fragment.numatoms
+#        grad_total = np.zeros((n_atoms, 3), dtype=float)
+#        E_total = 0.0
+#
+#        # Helper to compute single restraint energy (for numeric FD)
+#        def restraint_energy_single(rst, coords):
+#            t = rst["type"]
+#            idx = rst["idx"]
+#            if t == "bond":
+#                i, j = idx
+#                rij = np.linalg.norm(coords[i] - coords[j])
+#                dr = rij - rst["target"]
+#                return 0.5 * rst["k"] * (dr ** 2)
+#            elif t == "bonddiff":
+#                i, j, k_, l = idx
+#                r1 = np.linalg.norm(coords[i] - coords[j])
+#                r2 = np.linalg.norm(coords[k_] - coords[l])
+#                dv = (r1 - r2) - rst["target"]
+#                return 0.5 * rst["k"] * (dv ** 2)
+#            elif t == "angle":
+#                i, j, k_ = idx
+#                # compute angle (radians)
+#                v1 = coords[i] - coords[j]
+#                v2 = coords[k_] - coords[j]
+#                r1 = np.linalg.norm(v1); r2 = np.linalg.norm(v2)
+#                if r1 == 0 or r2 == 0:
+#                    return 0.0
+#                cos_theta = np.dot(v1, v2) / (r1 * r2)
+#                cos_theta = np.clip(cos_theta, -1.0, 1.0)
+#                theta = math.acos(cos_theta)
+#                dtheta = theta - rst["target"]
+#                return 0.5 * rst["k"] * (dtheta ** 2)
+#            elif t == "dihedral":
+#                i, j, k_, l = idx
+#                phi = self._dihedral_angle(coords[i], coords[j], coords[k_], coords[l])
+#                dphi = self._wrap_angle(phi - rst["target"])  # ensure -pi..pi
+#                return 0.5 * rst["k"] * (dphi ** 2)
+#            else:
+#                return 0.0
+#
+#        # For each restraint, compute analytic energy + gradient when available,
+#        # otherwise compute energy then numeric gradient over involved atoms.
+#        for rst in self._parsed_restraints:
+#            t = rst["type"]
+#            idx = rst["idx"]
+#
+#            if t == "bond":
+#                i, j = idx
+#                ri = coords_ang[i]; rj = coords_ang[j]
+#                vec = ri - rj
+#                r = np.linalg.norm(vec)
+#                if r == 0.0:
+#                    continue
+#                dr = r - rst["target"]
+#                E = 0.5 * rst["k"] * (dr ** 2)
+#                # dE/dri = k * dr * (vec / r)
+#                coeff = rst["k"] * dr / r
+#                g_i = coeff * vec
+#                g_j = -g_i
+#                grad_total[i] += g_i
+#                grad_total[j] += g_j
+#                E_total += E
+#
+#            elif t == "bonddiff":
+#                i, j, k_, l = idx
+#                ri = coords_ang[i]; rj = coords_ang[j]
+#                rk_ = coords_ang[k_]; rl = coords_ang[l]
+#                vec1 = ri - rj
+#                vec2 = rk_ - rl
+#                r1 = np.linalg.norm(vec1)
+#                r2 = np.linalg.norm(vec2)
+#                # avoid division by zero
+#                if r1 == 0.0 or r2 == 0.0:
+#                    continue
+#                dv = (r1 - r2) - rst["target"]
+#                E = 0.5 * rst["k"] * (dv ** 2)
+#                coeff = rst["k"] * dv
+#                g_i = coeff * (vec1 / r1)
+#                g_j = -g_i
+#                g_k = -coeff * (vec2 / r2)
+#                g_l = -g_k
+#                grad_total[i] += g_i
+#                grad_total[j] += g_j
+#                grad_total[k_] += g_k
+#                grad_total[l] += g_l
+#                E_total += E
+#
+#            elif t in ("angle", "dihedral"):
+#                # Use central finite differences for angle and dihedral restraint gradients.
+#                # Compute energy for the restraint:
+#                E_r = restraint_energy_single(rst, coords_ang)
+#                E_total += E_r
+#
+#                # Which atoms to differentiate
+#                atom_indices = rst["idx"]
+#                # numeric gradient only for atoms present
+#                for a in atom_indices:
+#                    # central difference per Cartesian component
+#                    for comp in range(3):
+#                        coords_plus = coords_ang.copy()
+#                        coords_minus = coords_ang.copy()
+#                        coords_plus[a, comp] += self._eps_fd
+#                        coords_minus[a, comp] -= self._eps_fd
+#                        Ep = restraint_energy_single(rst, coords_plus)
+#                        Em = restraint_energy_single(rst, coords_minus)
+#                        deriv = (Ep - Em) / (2.0 * self._eps_fd)  # dE/dx_a_comp
+#                        grad_total[a, comp] += deriv
+#            else:
+#                # unknown type -> ignore
+#                continue
+#
+#        return E_total, grad_total
+#
+#    @staticmethod
+#    def _wrap_angle(x):
+#        """Wrap angle to [-pi, pi]."""
+#        return (x + math.pi) % (2.0 * math.pi) - math.pi
+#
+#    @staticmethod
+#    def _dihedral_angle(r1, r2, r3, r4):
+#        """
+#        Compute dihedral angle (radians) for four positions r1..r4 (each array-like (3,)).
+#        Uses the standard vector formula with atan2 to get signed angle.
+#        """
+#        b1 = r2 - r1
+#        b2 = r3 - r2
+#        b3 = r4 - r3
+#
+#        # normals
+#        n1 = np.cross(b1, b2)
+#        n2 = np.cross(b2, b3)
+#        n1_norm = np.linalg.norm(n1)
+#        n2_norm = np.linalg.norm(n2)
+#        if n1_norm == 0.0 or n2_norm == 0.0:
+#            return 0.0
+#        n1_u = n1 / n1_norm
+#        n2_u = n2 / n2_norm
+#
+#        # unit b2
+#        b2_u = b2 / (np.linalg.norm(b2) if np.linalg.norm(b2) != 0.0 else 1.0)
+#
+#        x = np.dot(n1_u, n2_u)
+#        y = np.dot(np.cross(n1_u, n2_u), b2_u)
+#        angle = math.atan2(y, x)
+#        return angle
+#
+
+
+import math
+import numpy as np
+
+from ash.modules.optimizers.dlfind_optimizer import DLFIND_optimizerClass
+
+# Unit conversion constants
+BOHR = 1.8897259886                       # Å  → Bohr
+HARTREE_TO_KCAL = 627.509473              # Hartree → kcal/mol
+KCAL_TO_HARTREE = 1.0 / HARTREE_TO_KCAL   # kcal/mol → Hartree
+
+
+class DLFIND_ConstrainedOptimizerClass(DLFIND_optimizerClass):
+    """
+    Extends the standard DL-FIND optimizer in ASH to add *restraints*.
+
+    Restraints differ from constraints:
+       - Constraints (existing ASH feature) *fix* geometry exactly.
+       - Restraints (added here) *encourage* geometry toward a target via 
+         a harmonic energy penalty:  E = 0.5 * k * (value - target)^2
+
+    Supported restraints:
+        ("bond",     k, i, j, target_A)
+        ("angle",    k, i, j, k, target_deg)
+        ("dihedral", k, i, j, k, l, target_deg)
+        ("bonddiff", k, i, j, k, l, target_A)
+
+    All `k` values should be in kcal/mol·Å² (or kcal/mol·rad² for angles/dihedrals).
+    Atom indices should be 1-based (as usual in ASH input).
+
+
+    Restraints/Constraints syntax:
+
+    constraints = [
+        ("freeze", [1]),            # list of atoms to freeze
+        ("bond", 4, 10, 1.52)       # [i, j, dist] exact constraint 
+    ]
+
+    restraints = [
+        ("bonddiff", 15, 1, 2, 3, 4, 2.0)     # [k (weight), i, j, l, m, target Å] (shape: d(i,j)-d(l,m))
+        ("angle", 30.0, 3, 7, 9, 120.0),      # soft restraint
+        ("dihedral", 5.0, 2, 6, 9, 14, 180.0) # [k, i, j, target ⁰]
+    ]
+
+    """
+
+    def __init__(self, *args, restraints=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.restraints = restraints if restraints is not None else []
+
+    # ---- Helper functions for measuring internal coordinates ----
+
+    def _dist(self, xyz, i, j):
+        """Bond length (Å). xyz expected in Å, indices 1-based."""
+        return np.linalg.norm(xyz[i-1] - xyz[j-1])
+
+    def _angle(self, xyz, i, j, k):
+        """Angle (deg)."""
+        v1 = xyz[i-1] - xyz[j-1]
+        v2 = xyz[k-1] - xyz[j-1]
+        cosang = np.dot(v1, v2) / (np.linalg.norm(v1)*np.linalg.norm(v2))
+        cosang = np.clip(cosang, -1.0, 1.0)
+        return math.degrees(math.acos(cosang))
+
+    def _dihedral(self, xyz, i, j, k, l):
+        """Dihedral angle (deg)."""
+        p = xyz[[i-1, j-1, k-1, l-1]]
+        b0 = -1.0*(p[1] - p[0])
+        b1 = p[2] - p[1]
+        b2 = p[3] - p[2]
+        b1 /= np.linalg.norm(b1)
+        v = b0 - np.dot(b0, b1)*b1
+        w = b2 - np.dot(b2, b1)*b1
+        x = np.dot(v, w)
+        y = np.dot(np.cross(b1, v), w)
+        return math.degrees(math.atan2(y, x))
+
+    # ---- Harmonic restraint energy and gradient application ----
+
+    def _apply_restraints(self, energy, grad, xyz):
+        """
+        Modifies energy and gradient in-place to include restraint penalties.
+        `xyz` and geometry here are in **Å**, gradients in **Hartree/Bohr**.
+        We compute restraint forces in Å units → convert force → add to gradient.
+        """
+
+        if len(self.restraints) == 0:
+            return energy, grad
+
+        # Convert gradient to Å-units temporarily for adding our force:
+        # Bohr → Å: multiply by (1/BOHR)
+        grad_xyz = grad / BOHR
+
+        for r in self.restraints:
+            rtype = r[0].lower()
+
+            if rtype == "bond":
+                k, i, j, target = r[1:]
+                val = self._dist(xyz, i, j)
+                dE_dval = k * (val - target) * KCAL_TO_HARTREE
+
+                # Direction of force
+                rij = xyz[i-1] - xyz[j-1]
+                unit = rij / np.linalg.norm(rij)
+
+                # Apply forces (negative gradient direction)
+                grad_xyz[i-1] += dE_dval * unit
+                grad_xyz[j-1] -= dE_dval * unit
+                energy += 0.5 * k * (val - target)**2 * KCAL_TO_HARTREE
+
+            elif rtype == "angle":
+                k, i, j, k2, target_deg = r[1:]
+                val_deg = self._angle(xyz, i, j, k2)
+                diff_rad = math.radians(val_deg - target_deg)
+
+                # Finite difference derivative w.r.t. atom positions
+                # We'll use a small numerical derivative for the gradient part.
+                # This is common in many QM/MM restraint implementations.
+                eps = 1e-4
+                for a in (i, j, k2):
+                    for d in range(3):
+                        xyz_shift = xyz.copy()
+                        xyz_shift[a-1,d] += eps
+                        val_shift = self._angle(xyz_shift, i, j, k2)
+                        diff_shift = math.radians(val_shift - target_deg)
+                        dE = 0.5*k*(diff_shift**2) - 0.5*k*(diff_rad**2)
+                        grad_xyz[a-1,d] += dE/eps * KCAL_TO_HARTREE
+
+                energy += 0.5 * k * (diff_rad**2) * KCAL_TO_HARTREE
+
+            elif rtype == "dihedral":
+                k, i, j, k2, l, target_deg = r[1:]
+                val_deg = self._dihedral(xyz, i, j, k2, l)
+                diff_rad = math.radians(val_deg - target_deg)
+                eps = 1e-4
+                for a in (i, j, k2, l):
+                    for d in range(3):
+                        xyz_shift = xyz.copy()
+                        xyz_shift[a-1,d] += eps
+                        val_shift = self._dihedral(xyz_shift, i, j, k2, l)
+                        diff_shift = math.radians(val_shift - target_deg)
+                        dE = 0.5*k*(diff_shift**2) - 0.5*k*(diff_rad**2)
+                        grad_xyz[a-1,d] += dE/eps * KCAL_TO_HARTREE
+
+                energy += 0.5 * k * (diff_rad**2) * KCAL_TO_HARTREE
+
+            elif rtype == "bonddiff":
+                k, i, j, k2, l, target = r[1:]
+                val = (self._dist(xyz, i, j) -
+                       self._dist(xyz, k2, l))
+                dE_dval = k * (val - target) * KCAL_TO_HARTREE
+
+                # We treat as sum of two bond gradients
+                # First part
+                rij = xyz[i-1] - xyz[j-1]
+                unit1 = rij / np.linalg.norm(rij)
+                grad_xyz[i-1] += dE_dval * unit1
+                grad_xyz[j-1] -= dE_dval * unit1
+
+                # Second part (opposite sign)
+                rkl = xyz[k2-1] - xyz[l-1]
+                unit2 = rkl / np.linalg.norm(rkl)
+                grad_xyz[k2-1] -= dE_dval * unit2
+                grad_xyz[l-1]  += dE_dval * unit2
+
+                energy += 0.5 * k * (val - target)**2 * KCAL_TO_HARTREE
+
+        # Convert gradient back to Hartree/Bohr:
+        grad = grad_xyz * BOHR
+        return energy, grad
+
+    # ---- Override DL-FIND energy+gradient interface ----
+
+    def energy_and_gradient(self, *args, **kwargs):
+        """
+        Call the original energy/gradient routine, then add restraint correction.
+        This ensures restraints are applied *after* QM/MM evaluation.
+        """
+        energy, grad, xyz_bohr = super().energy_and_gradient(*args, **kwargs)
+
+        # Convert coordinates to Å for restraint evaluation
+        xyz = xyz_bohr / BOHR
+
+        # Apply restraints
+        energy, grad = self._apply_restraints(energy, grad, xyz)
+
+        return energy, grad, xyz_bohr
+
+
+
+
+
+
+
+def DLFIND_constrained_optimizer(jobtype=None, theory=None, fragment=None, fragment2=None, charge=None, mult=None, 
+                                 maxcycle=250, tolerance=4.5E-4, tolerance_e=1E-6,
+                                 actatoms=None, frozenatoms=None, residues=None, 
+                                 constraints=None, restraints=None,
+                                 printlevel=2, NumGrad=False, delta=0.01,
+                                 icoord=None, iopt=None, nimage=None, 
+                                 hessian_choice="numfreq", inithessian=0, 
+                                 numfreq_npoint=1, numfreq_displacement=0.005, numfreq_hessatoms=None,
+                                 numfreq_force_projection=None, print_atoms_list=None):
+    """
+    Wrapper function around DLFIND_ConstrainedOptimizerClass
+    Adds support for harmonic restraints (bond / angle / dihedral / bond-diff).
+    """
+    import time
+    timeA = time.time()
+
+    if theory is None or fragment is None:
+        print("DLFIND_constrained_optimizer requires theory and fragment objects. Exiting.")
+        ashexit()
+
+    # Instantiate NEW optimizer class (your subclass)
+    optimizer = DLFIND_ConstrainedOptimizerClass(
+        jobtype=jobtype, theory=theory, fragment=fragment, fragment2=fragment2,
+        charge=charge, mult=mult, actatoms=actatoms,
+        frozenatoms=frozenatoms, residues=residues,
+        constraints=constraints, restraints=restraints,   # << NEW ARG HERE
+        delta=delta, printlevel=printlevel,
+        icoord=icoord, iopt=iopt, maxcycle=maxcycle,
+        tolerance=tolerance, tolerance_e=tolerance_e,
+        nimage=nimage,
+        hessian_choice=hessian_choice, inithessian=inithessian,
+        numfreq_npoint=numfreq_npoint, numfreq_displacement=numfreq_displacement,
+        numfreq_hessatoms=numfreq_hessatoms,
+        numfreq_force_projection=numfreq_force_projection,
+        print_atoms_list=print_atoms_list
+    )
+
+    # Optionally wrap theory for numerical gradients
+    if NumGrad:
+        print("NumGrad flag detected. Wrapping theory object into NumGrad class")
+        theory = NumGradclass(theory=theory)
+
+    # Run optimization
+    result = optimizer.run(theory=theory, fragment=fragment, charge=charge, mult=mult)
+
+    if printlevel >= 1:
+        print_time_rel(timeA, modulename='DL-FIND (constrained)', moduleindex=1)
+
+    return result
