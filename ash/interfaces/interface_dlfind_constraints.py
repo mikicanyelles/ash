@@ -20,7 +20,7 @@ from ash.modules.module_results import ASH_Results
 from ash.modules.module_freq import NumFreq,AnFreq,calc_hessian_xtb
 from ash.modules.module_QMMM import QMMMTheory
 from ash.modules.module_oniom import ONIOMTheory
-from ash.modules.interfaces.interface_dlfind import DLFIND_optimizerClass
+from ash.interfaces.interface_dlfind import DLFIND_optimizerClass
 import math
 import numpy as np
 import functools
@@ -969,10 +969,8 @@ KCAL_TO_HARTREE = 1.0 / HARTREE_TO_KCAL   # kcal/mol → Hartree
 #
 
 
-import math
-import numpy as np
 
-from ash.modules.optimizers.dlfind_optimizer import DLFIND_optimizerClass
+
 
 # Unit conversion constants
 BOHR = 1.8897259886                       # Å  → Bohr
