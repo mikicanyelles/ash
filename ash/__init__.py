@@ -173,6 +173,7 @@ from .modules.module_molcrys import molcrys, Fragmenttype
 # Geometry optimization
 from .functions.functions_optimization import SimpleOpt, BernyOpt
 from .interfaces.interface_dlfind import DLFIND_optimizer
+from .interfaces.interface_dlfind_constraints import DLFIND_optimizer_with_constraints, DLFIND_constrained_optimizer
 
 # geomeTRIC interface
 from .interfaces.interface_geometric_new import geomeTRICOptimizer,GeomeTRICOptimizerClass
