@@ -202,6 +202,7 @@ class DLFIND_optimizerClass:
         # What to optimize etc.
         self.spec=[]
         if actatoms is not None:
+            self.actatoms = actatoms
             print("Actatoms provided:", actatoms)
             print("All atoms:", fragment.allatoms)
             for i in fragment.allatoms:
